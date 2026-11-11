@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mayfly-publish"
+version = "0.1.0"
+description = "Private temporary file URL transport over S3-compatible storage"
+readme = "README.md"
+requires-python = ">=3.15.2"
+dependencies = [
+  "boto3>=1.35,<2",
+  "keyring>=25.7,<26",
+  "mcp>=1.15,<2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10", "ruff>=0.9,<1", "mypy>=1.15,<2", "boto3-stubs[s3]>=1.35,<2"]
+
+[project.scripts]
+mayfly-publish = "mayfly_publish.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mayfly_publish"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py315"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S"]
+ignore = ["S101"]
+
+[tool.mypy]
+python_version = "3.15"
+mypy_path = "src"
+packages = ["mayfly_publish"]
+strict = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

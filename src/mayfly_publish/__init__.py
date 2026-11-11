@@ -1,0 +1,1 @@
+"""Mayfly Publish MCP server."""
