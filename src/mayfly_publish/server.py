@@ -7,6 +7,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 from .errors import PublishError
+from .local_files import list_files
 from .settings import Settings
 from .staging import Publisher
 from .storage import Storage
@@ -28,6 +29,17 @@ def create_server(settings: Settings, storage: Storage | None = None) -> FastMCP
         except Exception:
             log.error("tool_failed code=internal_error")
             return {"error": "internal_error", "message": "Operation failed; see local diagnostics"}
+
+    @mcp.tool(
+        annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+    )
+    def list_local_files() -> dict[str, object]:
+        """List relative JPEG, MP4, and folder paths beneath FILE_ROOT, including nested paths.
+
+        Paths identify available files only. Never use filenames or folder names for
+        captions, descriptions, alt text, hashtags, or subject identification.
+        """
+        return safe(list_files, settings.file_root, settings.max_file_bytes)
 
     @mcp.tool(
         annotations=ToolAnnotations(

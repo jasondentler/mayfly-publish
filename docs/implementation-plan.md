@@ -6,7 +6,7 @@ Mayfly Publish is a stateless, client-agnostic MCP transport for user-selected l
 
 > Mayfly Publish MUST NOT supply information used to generate or modify content, including captions, descriptions, alt text, hashtags, or subject identification. All editorial content comes from files, metadata, and instructions supplied directly to the calling client. Mayfly Publish supplies only temporary transport information.
 
-The MCP does not list files, inspect file contents, extract metadata, generate previews, or return source filenames. It has no SQLite database or staging registry. Its temporary S3 objects are the only staging state.
+The MCP can list relative file and folder paths under `FILE_ROOT`. It does not inspect file contents, extract metadata, or generate previews. It has no SQLite database or staging registry. Its temporary S3 objects are the only staging state.
 
 ## Architecture
 
@@ -24,6 +24,11 @@ The current secure file opener targets POSIX systems (macOS and Linux) through `
 
 ## Tools
 
+### `list_local_files()`
+
+- Return sorted `files` and `folders` arrays of relative paths under `FILE_ROOT`, including nested paths. List only `.jpg`, `.jpeg`, and `.mp4` files, matching extensions case insensitively. Skip hidden entries, symlinks, special files, files over `MAX_FILE_BYTES`, and paths too long for `temp_publish`. Do not return absolute paths or inspect contents.
+- Treat paths as transport identifiers only; do not derive editorial content from them.
+
 ### `temp_publish(relative_path, ttl_seconds=None, content_type=None)`
 
 - The caller supplies a path relative to configured `FILE_ROOT`. The server rejects absolute paths, traversal, hidden components, symlinks, directories, special devices, and paths outside the root. File access uses `O_NOFOLLOW` and validates the open file's device, inode, size, and modification time before and after upload.
@@ -39,7 +44,7 @@ The current secure file opener targets POSIX systems (macOS and Linux) through `
 
 ## Configuration, security, and logging
 
-Configuration comes from a mode-`0600` `.env` file and/or process environment. Require an existing readable `FILE_ROOT`, HTTPS `S3_ENDPOINT`, region, bucket, managed prefix, credentials, valid TTL, and positive file size/retention limits. `S3_ADDRESSING_STYLE` supports `path`, `virtual`, and `auto` for provider compatibility. Use SigV4 and TLS verification. Setup stores the endpoint, bucket name, and credentials in the OS system keyring through the Python `keyring` library; `.env` contains only generic service references and non-account defaults. An unavailable backend fails closed. Never log, write to project files, or return credentials, full signed URLs, or local paths. MCP stdout is protocol-only; application logs go to stderr and contain safe event names, staging IDs, sizes, counts, and error codes.
+Configuration comes from a mode-`0600` `.env` file and/or process environment. Require an existing readable `FILE_ROOT`, HTTPS `S3_ENDPOINT`, region, bucket, managed prefix, credentials, valid TTL, and positive file size/retention limits. `S3_ADDRESSING_STYLE` supports `path`, `virtual`, and `auto` for provider compatibility. Use SigV4 and TLS verification. Setup stores the endpoint, bucket name, and credentials in the OS system keyring through the Python `keyring` library; `.env` contains only generic service references and non-account defaults. An unavailable backend fails closed. Never log credentials, full signed URLs, or local paths, and never write them to project files. The listing tool returns relative paths only. MCP stdout is protocol-only; application logs go to stderr and contain safe event names, staging IDs, sizes, counts, and error codes.
 
 Use a private bucket and prefer a dedicated object read/write credential scoped to it where the provider supports that scope. Bucket creation, credential issuance, and lifecycle configuration are manual setup steps. Do not provision resources or use real credentials without user approval.
 The runtime requires only `PutObject`, `HeadObject`, `DeleteObject`, and `ListObjectsV2` permissions; signing a presigned `GetObject` URL is local. A bucket-scoped object read/write token with listing is sufficient where available. No bucket create/list/configure API is called by Mayfly Publish. Allow safe path components in `S3_ENDPOINT` for S3-compatible APIs that require them. Keep credentials in distinct OS keyring services and restrict the configured bucket and prefix.
@@ -51,9 +56,9 @@ Signed URL expiry does not delete the object. Explicit `revoke_object` ends acce
 ## Testing and acceptance
 
 - Ruff lint/format, strict mypy, and pytest pass without real credentials or cloud resources.
-- A stdio MCP handshake exposes exactly `temp_publish` and `revoke_object`.
+- A stdio MCP handshake exposes exactly `list_local_files`, `temp_publish`, and `revoke_object`.
 - Tests cover arbitrary binary/text/extensionless/empty files, safe path handling, MIME override validation, size limits, source-change detection, upload verification, SigV4 GET signing, idempotent revoke, managed-key cleanup, system keyring references, and safe logs.
-- No response contains source content, original filename, editorial fields, credentials, or authentication headers. No local source file is changed.
+- Listing responses contain relative paths only. No upload response contains source content, original filename, editorial fields, credentials, or authentication headers. No local source file is changed.
 - A manual integration check uses a disposable file and user-approved storage credentials: verify a signed URL from an unauthenticated client, verify response content type and length, revoke it, and confirm the source hash is unchanged. Recipient-specific testing is optional and outside the MCP contract.
 
 ## References

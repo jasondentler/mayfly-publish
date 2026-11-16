@@ -3,7 +3,31 @@ from pathlib import Path
 import pytest
 
 from mayfly_publish.errors import PublishError
-from mayfly_publish.local_files import open_file
+from mayfly_publish.local_files import list_files, open_file
+
+
+def test_list_files_includes_nested_paths_and_skips_unuploadable_entries(tmp_path: Path) -> None:
+    (tmp_path / "top.jpg").write_bytes(b"photo")
+    (tmp_path / "upper.JPEG").write_bytes(b"photo")
+    (tmp_path / "clip.MP4").write_bytes(b"video")
+    (tmp_path / "note.txt").write_text("note")
+    (tmp_path / "extensionless").write_bytes(b"")
+    (tmp_path / "too-large.jpg").write_bytes(b"oversized")
+    nested = tmp_path / "trip" / "day1"
+    nested.mkdir(parents=True)
+    (nested / "image.jpg").write_bytes(b"image")
+    (nested / "ignored.png").write_bytes(b"image")
+    (nested / ".hidden.jpg").write_bytes(b"hidden")
+    (tmp_path / ".private").mkdir()
+    (tmp_path / ".private" / "secret.jpg").write_bytes(b"secret")
+    (tmp_path / "linked.jpg").symlink_to(tmp_path / "top.jpg")
+    (tmp_path / "linked-folder").symlink_to(nested, target_is_directory=True)
+    (tmp_path / "bad\\name.jpg").write_bytes(b"bad")
+
+    assert list_files(tmp_path, 5) == {
+        "files": ["clip.MP4", "top.jpg", "trip/day1/image.jpg", "upper.JPEG"],
+        "folders": ["trip", "trip/day1"],
+    }
 
 
 def test_arbitrary_types_extensionless_and_empty(tmp_path: Path) -> None:

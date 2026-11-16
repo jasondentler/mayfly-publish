@@ -11,6 +11,7 @@ from typing import BinaryIO
 from .errors import PublishError
 
 CONTENT_TYPE = re.compile(r"[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+")
+LISTED_EXTENSIONS = {".jpg", ".jpeg", ".mp4"}
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,48 @@ class OpenedFile:
             self.mtime_ns,
         ):
             raise PublishError("file_changed", "File changed during transfer")
+
+
+def list_files(root: Path, max_bytes: int) -> dict[str, object]:
+    """List JPEGs, MP4s, and directories beneath root without following links."""
+    files: list[str] = []
+    folders: list[str] = []
+    pending: list[tuple[int, str]] = []
+    flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        pending.append((os.open(root, flags), ""))
+        while pending:
+            directory_fd, prefix = pending.pop()
+            try:
+                with os.scandir(directory_fd) as entries:
+                    for entry in entries:
+                        name = entry.name
+                        relative_path = f"{prefix}/{name}" if prefix else name
+                        if name.startswith(".") or "\\" in name or len(relative_path) > 1024:
+                            continue
+                        if entry.is_symlink():
+                            continue
+                        if entry.is_dir(follow_symlinks=False):
+                            try:
+                                child_fd = os.open(name, flags, dir_fd=directory_fd)
+                            except OSError as exc:
+                                raise PublishError("file_unavailable", "Folder is unavailable") from exc
+                            folders.append(relative_path)
+                            pending.append((child_fd, relative_path))
+                        elif (
+                            Path(name).suffix.lower() in LISTED_EXTENSIONS
+                            and entry.is_file(follow_symlinks=False)
+                            and entry.stat(follow_symlinks=False).st_size <= max_bytes
+                        ):
+                            files.append(relative_path)
+            finally:
+                os.close(directory_fd)
+    except OSError as exc:
+        raise PublishError("file_unavailable", "Folder is unavailable") from exc
+    finally:
+        for directory_fd, _ in pending:
+            os.close(directory_fd)
+    return {"files": sorted(files), "folders": sorted(folders)}
 
 
 def open_file(root: Path, relative_path: str, max_bytes: int, content_type: str | None = None) -> OpenedFile:
