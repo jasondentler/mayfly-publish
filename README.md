@@ -2,11 +2,11 @@
 
 ![Mayfly Publish logo](docs/assets/mayfly-publish-logo.png)
 
-Mayfly Publish is a stateless MCP server that transfers a user-selected local file to private S3-compatible storage and returns a temporary HTTPS GET URL. The URL can serve any ephemeral need. The server runs over stdio and is independent of the calling MCP client, storage provider, and URL recipient.
+Mayfly Publish is a stateless MCP server that previews local JPEGs and MP4s, and can transfer a user-selected local file to private S3-compatible storage for a temporary HTTPS GET URL. The server runs over stdio and is independent of the calling MCP client, storage provider, and URL recipient.
 
 ## Install
 
-Requirements: [uv](https://docs.astral.sh/uv/), `tunnel-client`, an existing private S3-compatible bucket, and macOS or Linux. `make setup` installs the latest available Python 3.15 patch release (at least 3.15.2) and project dependencies.
+Requirements: [uv](https://docs.astral.sh/uv/), `tunnel-client`, an existing private S3-compatible bucket, and macOS or Linux. Local previews require `ffmpeg` and `ffprobe` on `PATH`; metadata requires `exiftool`. `make setup` installs the latest available Python 3.15 patch release (at least 3.15.2) and project dependencies.
 
 ```sh
 make setup
@@ -41,7 +41,9 @@ MCP client → revoke_object after the temporary need ends
 Local cleanup + provider lifecycle where available → remove abandoned objects
 ```
 
-File bytes travel directly from the host to the configured storage provider; MCP responses contain no file bytes. The server opens no HTTP listener or inbound port. A signed URL is a bearer credential: anyone holding it can fetch the object until it expires or the object is deleted.
+`preview_local_file` returns resized JPEG image content through MCP without uploading it to S3. For MP4s, it returns up to three still frames sampled across the clip; it does not play motion or audio. Previews are at most 960 pixels on either side and 2 MB per image. `temp_publish` sends the original file directly from the host to the configured private bucket. The server opens no HTTP listener or inbound port. A signed URL is a bearer credential: anyone holding it can fetch the object until it expires or the object is deleted.
+
+`get_local_metadata` returns ExifTool-readable tags directly through MCP, without uploading. Metadata can include GPS coordinates and other sensitive information. Source path fields are removed; embedded tag values are returned as ExifTool reports them. Binary media payloads are not included.
 
 The server accepts any regular file type beneath `FILE_ROOT`, including extensionless files, and rejects traversal, symlinks, and oversized files. The file listing shows only folders and files with `.jpg`, `.jpeg`, or `.mp4` extensions (case insensitive), and skips hidden entries, symlinks, special files, and files over `MAX_FILE_BYTES`. It does not inspect file bytes to verify the format. It never rewrites the source. Storage requests use TLS and SigV4; an upload is reported ready only after remote verification.
 
@@ -52,20 +54,23 @@ Objects use generated names under `S3_PREFIX`. Logs omit local paths, credential
 | Tool | Inputs | Output |
 | --- | --- | --- |
 | `list_local_files` | None | Sorted `files` and `folders` arrays of paths relative to `FILE_ROOT`, including nested paths. Only JPEG and MP4 filename extensions are listed; files over `MAX_FILE_BYTES` are omitted. |
+| `preview_local_file` | `relative_path` | Local image preview for JPEGs or up to three sampled still frames for MP4s; no S3 upload. |
+| `get_local_metadata` | `relative_path` | Grouped ExifTool tags for a JPEG or MP4, including embedded and unknown tags where available; no S3 upload. |
 | `temp_publish` | `relative_path`, optional `ttl_seconds`, optional `content_type` | New private object; `staging_id`, `url`, `url_expires_at`, `content_type`, `size_bytes`, `status`. Every call creates a new object. |
 | `revoke_object` | `staging_id` | Deletes the matching temporary object and returns `revoked`; repeated calls are safe. |
 
 If the recipient requires a specific MIME type, pass `content_type` (for example, `application/pdf`). Otherwise the server guesses from the filename and uses `application/octet-stream` for unknown types. The upload and revoke tools declare MCP write annotations, so a client may request confirmation.
 
-1. Call `list_local_files` to find a relative path, or give the MCP client the relative path of a file under `FILE_ROOT`. Call `temp_publish` with the path and, if needed, `content_type` and TTL.
-2. Give the returned URL to the chosen recipient while it is valid. Treat the URL as a secret.
-3. When the recipient no longer needs the temporary object, call `revoke_object(staging_id)`.
+1. Call `list_local_files` to find a relative path, or give the MCP client the relative path of a file under `FILE_ROOT`. Use `preview_local_file` to inspect a JPEG or MP4 and `get_local_metadata` to read its tags.
+2. When a URL is needed, call `temp_publish` with the path and, if needed, `content_type` and TTL.
+3. Give the returned URL to the chosen recipient while it is valid. Treat the URL as a secret.
+4. When the recipient no longer needs the temporary object, call `revoke_object(staging_id)`.
 
 URL expiration does not delete the object. Each `temp_publish` call creates a separate object and URL.
 
 ## Optional OpenAI Secure MCP Tunnel
 
-Any compatible local MCP client can launch `scripts/run-mcp.sh` over stdio. `make serve` starts OpenAI Secure MCP Tunnel and its MCP child using the profile created by `make setup`. Obtain the tunnel ID and a restricted runtime key before setup; see the [tunnel guide](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels). Run `make tunnel-doctor` to check the profile, then connect your OpenAI client and confirm discovery of `temp_publish` and `revoke_object`.
+Any compatible local MCP client can launch `scripts/run-mcp.sh` over stdio. `make serve` starts OpenAI Secure MCP Tunnel and its MCP child using the profile created by `make setup`. Obtain the tunnel ID and a restricted runtime key before setup; see the [tunnel guide](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels). Run `make tunnel-doctor` to check the profile, then connect your OpenAI client and confirm discovery of all five MCP tools.
 
 `make serve` stops both processes after one hour. Override that with `make serve LIFETIME_SECONDS=7200`; the allowed range is 1–86400 seconds, with no unlimited mode. The host must remain awake and online while serving.
 

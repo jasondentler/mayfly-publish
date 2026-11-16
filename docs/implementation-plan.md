@@ -2,11 +2,11 @@
 
 ## Purpose and boundary
 
-Mayfly Publish is a stateless, client-agnostic MCP transport for user-selected local files. It uploads any regular file to a private S3-compatible bucket and returns a short-lived, direct HTTPS GET URL. The URL may be used by any recipient for an ephemeral need. It never edits, moves, deletes, or interprets the local source, and it never calls the recipient service.
+Mayfly Publish is a stateless, client-agnostic MCP server for local media preview, metadata, and temporary file transport. It previews JPEGs and MP4s, reads their ExifTool metadata, and can upload any regular file to a configured private S3-compatible bucket for a short-lived, direct HTTPS GET URL. It never edits, moves, or deletes the local source, and it never calls the recipient service.
 
-> Mayfly Publish MUST NOT supply information used to generate or modify content, including captions, descriptions, alt text, hashtags, or subject identification. All editorial content comes from files, metadata, and instructions supplied directly to the calling client. Mayfly Publish supplies only temporary transport information.
+Preview image content and embedded metadata may be used by the calling client to identify subjects and prepare editorial text. Filenames, folder names, and transport output must not be used for that purpose.
 
-The MCP can list relative file and folder paths under `FILE_ROOT`. It does not inspect file contents, extract metadata, or generate previews. It has no SQLite database or staging registry. Its temporary S3 objects are the only staging state.
+The MCP can list relative paths, return resized image previews, and read metadata under `FILE_ROOT`. It keeps no staging registry. Its temporary S3 objects are the only staging state.
 
 ## Architecture
 
@@ -28,6 +28,17 @@ The current secure file opener targets POSIX systems (macOS and Linux) through `
 
 - Return sorted `files` and `folders` arrays of relative paths under `FILE_ROOT`, including nested paths. List only `.jpg`, `.jpeg`, and `.mp4` files, matching extensions case insensitively. Skip hidden entries, symlinks, special files, files over `MAX_FILE_BYTES`, and paths too long for `temp_publish`. Do not return absolute paths or inspect contents.
 - Treat paths as transport identifiers only; do not derive editorial content from them.
+
+### `preview_local_file(relative_path)`
+
+- Accept a relative JPEG or MP4 path under `FILE_ROOT` using the same secure file opener as upload. The extension check is case insensitive; FFmpeg decodes the bytes. No S3 operation occurs.
+- Return one resized JPEG image for a still, or up to three JPEG still frames from an MP4 near its start, middle, and end. Limit each image to 960 pixels per side and 2 MB. Motion and audio are not returned.
+- Require local `ffmpeg` and `ffprobe` executables. Run them with a restricted input protocol list and a timeout; avoid exposing paths or decoder errors in MCP responses.
+
+### `get_local_metadata(relative_path)`
+
+- Accept a relative JPEG or MP4 path under `FILE_ROOT` using the same secure file opener as upload. Run local ExifTool with group and copy identifiers, unknown tags, and embedded extraction enabled. No S3 operation occurs.
+- Return all ExifTool-readable tags in a `metadata` object, excluding filesystem path fields. Embedded tag values may include sensitive information such as GPS coordinates. Binary media payloads are omitted. Reject extraction failures and responses over 10 MB rather than returning partial metadata.
 
 ### `temp_publish(relative_path, ttl_seconds=None, content_type=None)`
 
@@ -56,9 +67,9 @@ Signed URL expiry does not delete the object. Explicit `revoke_object` ends acce
 ## Testing and acceptance
 
 - Ruff lint/format, strict mypy, and pytest pass without real credentials or cloud resources.
-- A stdio MCP handshake exposes exactly `list_local_files`, `temp_publish`, and `revoke_object`.
+- A stdio MCP handshake exposes exactly `list_local_files`, `preview_local_file`, `get_local_metadata`, `temp_publish`, and `revoke_object`.
 - Tests cover arbitrary binary/text/extensionless/empty files, safe path handling, MIME override validation, size limits, source-change detection, upload verification, SigV4 GET signing, idempotent revoke, managed-key cleanup, system keyring references, and safe logs.
-- Listing responses contain relative paths only. No upload response contains source content, original filename, editorial fields, credentials, or authentication headers. No local source file is changed.
+- Listing responses contain relative paths only. Preview responses contain reduced image content, and metadata responses contain ExifTool tags. No upload response contains source content, original filename, editorial fields, credentials, or authentication headers. No local source file is changed.
 - A manual integration check uses a disposable file and user-approved storage credentials: verify a signed URL from an unauthenticated client, verify response content type and length, revoke it, and confirm the source hash is unchanged. Recipient-specific testing is optional and outside the MCP contract.
 
 ## References

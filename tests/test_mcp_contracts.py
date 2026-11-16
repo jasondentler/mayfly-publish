@@ -26,11 +26,21 @@ def test_mcp_tools(tmp_path: Path) -> None:
 
     async def check() -> None:
         tools = await server.list_tools()
-        assert {tool.name for tool in tools} == {"list_local_files", "temp_publish", "revoke_object"}
+        assert {tool.name for tool in tools} == {
+            "list_local_files",
+            "preview_local_file",
+            "get_local_metadata",
+            "temp_publish",
+            "revoke_object",
+        }
         annotations = {tool.name: tool.annotations for tool in tools}
         assert annotations["list_local_files"] is not None
         assert annotations["list_local_files"].readOnlyHint is True
         assert annotations["list_local_files"].destructiveHint is False
+        assert annotations["preview_local_file"] is not None
+        assert annotations["preview_local_file"].readOnlyHint is True
+        assert annotations["get_local_metadata"] is not None
+        assert annotations["get_local_metadata"].readOnlyHint is True
         assert annotations["temp_publish"] is not None
         assert annotations["temp_publish"].readOnlyHint is False
         assert annotations["temp_publish"].destructiveHint is False
